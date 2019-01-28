@@ -1,0 +1,249 @@
+rm(list=ls())
+dev.off
+
+data <- scan("Car 1.txt")
+plot.ts(data)
+s=12
+st=c(1976,1)
+styear=1976
+data=ts(data,frequency = s,start = st)
+y=data[1:504]
+T=length(y)
+y=ts(y,frequency = s,start=st)
+years=T/s
+t=(1:T)
+plot(y, ylab="Vehicles sold", main="Total Vehicle Sales, Thousands of Units, Monthly")
+summary(y)
+
+
+Comp.=stl(data,"periodic")
+plot(Comp.) #does not seem to follow a trend rather, it follow seasonality and
+# cycles. Question, is wheather it is a stochastic random walk process
+#looking at the dip after the recession this could be the question.  
+
+
+#the seasonal component does not increase over time, it stays constant. 
+#so would aruge that we are working with a additive model rather than
+# multiplicative 
+data.TSE=decompose(y,type = c("additive"))
+plot(data.TSE)
+
+################################ Linear-trend #########################################
+
+linear.t=lm(y~t) #there also seems to be a increase, suggesting a trend 
+model.t=y-linear.t$residuals
+summary(linear.t)
+linear.residuals=y-model.t #residuals for the linear model 
+
+par(mar=c(5,5,5,5))
+plot(y,ylab="Vehicle Sales",ylim=c(0,1800), main="Actual Sales vs Trend Thousand of Units")
+lines(model.t,col="red") # does not explain the variation in y that well. 
+#looks to have seasont, but maybe also has cyclical pattern to it. 
+#maybe a unit it, because after the drop we can see it does not revert to the mean 
+
+#plotting the residuals now 
+par(new=T)
+max(ST.residuals) #585
+min(ST.residuals) #-595 
+plot(linear.residuals,ylim=c(-600,2000),ylab="",axes=F)
+abline(h=0,col="gray")
+
+
+acf(linear.residuals) #looks like seasonlity with spikes increasing a each lag 1 
+pacf(linear.residuals) #can we see seasonal patterns in PACF 
+#parcial autocorrlation function removes lagged effect. 
+
+b1=5.207e-01*1000 #increase of 520.7 units a years approx. 
+
+################################ Seasonality #########################################
+seasonal.matrix=matrix(y,ncol=s,byrow=years) #seasonal dummy variables 
+SeasonalFactor= apply(seasonal.matrix,2,mean) #decrease in the first part of the year
+SeasonalFactor=ts(SeasonalFactor,frequency=s) #
+SeasonalFactor
+mean(SeasonalFactor)
+plot(SeasonalFactor);abline(h=1255.337,col='red')
+
+#Let's add seasonal dummies to our model of trend. 
+library("forecast")
+#To exclude last season
+M <- seasonaldummy(y)
+
+M <- seasonaldummy(y) #we actually didn't need to do our matrix.....
+ST.model=lm(y~t +M ) #we need to omitt either one seasonal dummy or the intercept two avoid
+# multicolinary, when at least two variable as highly correlated 
+summary(ST.model)
+
+ST.model <- tslm(y ~ t + season) #we omitted jan instead of december 
+summary(ST.model) #the model itself is significant with an F-statistic of 21.68
+#the estimates are also significant. 
+#beginning of the summer the vehicle industry sees an increase 
+#we can explain 33% of the variance in y with our model, based on seasons and a linear trend 
+
+
+ST.trend=y-ST.model$residuals 
+ST.residuals=y-ST.trend #residuals for the seasons 
+
+#plot with trend and seasonality 
+
+#plotting the model with the residuals 
+min(ST.trend) #897
+max(ST.model) #1525 
+par(mar=c(5,5,5,5))
+plot(y, ylab="Vehicle Sodl",ylim=c(-500,2000),main="Actual Vehical Sales Data vs Trend and Seasonal Forecast")
+lines(ST.trend, col="red")
+
+#plot the residuals as well 
+par(new=T)
+max(ST.residuals) #585
+min(ST.residuals) #-595 
+plot(ST.residuals,ylim=c(-600,2000),ylab="",axes=F)
+abline(h=0,col="gray")
+axis(4,pretty(c(-600,600)))
+mtext("Residuals",side=4,line=2.5,at=0)
+#the error do not behave as white noise. 
+#the model seem pretty predictable, however, it seems as it does not revert to the mean
+#suggesting there might be a unit root present 
+
+#by just examing the residuals they do not behave as white noise. 
+#instead i would argue we can both see a cyclical component. 
+#looking back in the 1970-2000, the residuals seem to be stationary reverting back
+#to its mean, however, around the finacial crises there seem to be sign of a unit root
+#present, meaning that the errors don't revert back to the mean, making them
+#impossible to forecast. 
+
+#to test wheather there is serial correlation left in the residuals, 
+#if there is we can use it to improve our model 
+
+library("lmtest") #there is still serial correlation within the residuals. 
+dwtest(ST.model)
+#should be a value between 1,5 and 2 otherwise there are sign for serial correlation
+#in the residuals. We reject the null hypothesis that there is non-autocorrelation
+#Positive autocorrelation 
+
+
+################################# ARIMA  #########################################
+
+#knowing that there is still autocorrelation left in the residuals 
+#we need to determine wether the time series is deterministic, reverts back to the mean
+#our if it stochastic, in this case with drift (trend )
+
+#first we deseaonlize the data 
+SA.trend=y-ST.trend+model.t
+plot(SA.trend,main="Deasonalized Vehical Sales")
+
+#first we test for a unit root, which indicates what type of model we are 
+#dealing with. A stochastic has a unit root, meaning its theta is 1
+#so an error will push next y and it will continue on from that new point
+#explain this better. 
+# if the time series has a unit root, one can often see it by looking at 
+#the auto - and partial correlation functions. A time series with a unit 
+#root the act will dampen slowely and the partial will usually just have on significant spike 
+# at one 
+
+
+acf(SA.trend) # acf dampens slowely 
+pacf(SA.trend) # however, pacf has significant spikes after lagged on 
+
+#however, we can formally test if  the model posses a unit root, with the agumented
+#dickey fuller-test with drift. 
+library(urca)
+test <- ur.df(SA.trend,type=c("trend"),lags=20,selectlags="AIC")
+summary(test)
+
+#the test suggest that we have a unit root because of t-value > than the critical values
+#z.lag.1 is almost 1 and significant (why does this matter and mean=)
+
+#we have a unit root. So, we need to difference the data at least one.
+#lets see if it is in  the first difference. 
+#by examining the SA.trend in the first difference 
+
+acf(diff(SA.trend)) #some significant spikes left, but it does dampen
+pacf(diff(SA.trend)) #again som significant spikes, so the model suggest AR3 and MA(1)
+#in the first difference. This make the model stationary, however, it is not a complete 
+#random walk, but instead there is still some autocorrelation 
+#so lag y and lagged errors will have an effect on Y. 
+#when we first difference it we remove lagged Y. Yt= Yt-YT-1
+#we have a unit root, random walk with drift. 
+# an innovation can push the model 
+
+
+#lets find the best AIRMA 
+best.order <- order=c(0,1,0) #first, differentiation 
+best.aic <- Inf #find the lowest AIC score 
+for (p in 0:4) for (q in 0:4) {
+  fit.aic <- AIC(arima(SA.trend,order = c(p,1,q),xreg=1:T,optim.control = list(maxit = 1000)))
+  print(c(p,q,fit.aic))
+  if (fit.aic < best.aic) {
+    best.order <- c(p,1,q)
+    best.arima <- arima(SA.trend, order = best.order,xreg=1:T,optim.control = list(maxit = 1000))
+    best.aic <- fit.aic
+  }
+}
+best.order
+best.arima
+summary(best.arima) 
+m.arima=SA.trend-residuals(best.arima)
+residuals.arma=SA.trend-m.arima
+#the model suggust a ARIMA (2,1,3) model or and ARMA(2,3) in the
+#first difference based on lowest AIC score. 
+#thing is here, moving average has a short memory. 
+#it will only affect T+3 periods in the horizon, meanwhile, AR
+#has a longer lasting effect. # show the different models and why 
+
+
+
+par(mar=c(5,5,5,5))
+plot(SA.trend,ylim=c(-500,2000),main="Actual Vehical Sales Data vs ARIMA (2,1,3)")
+lines(m.arima,col="green")
+
+par(new=T)
+max(residuals.arma) #585
+min(residauls.arma) #-595 
+plot(resiudals.arma,ylim=c(-600,2000),ylab="",axes=F)
+abline(h=0,col="gray")
+axis(4,pretty(c(-600,600)))
+mtext("Residuals",side=4,line=2.5,at=0)
+
+#the residuals seem to behave as white noise, so lets see if there is still some
+#autocorrelation left that we might have missed
+
+acf(residuals.arma)
+pacf(residuals.arma)
+# we have some significant spikes,suggesting some autocorrelation left. 
+# however, we can test it by the durbing watson t, which we explain earlier 
+
+dw = sum((best.arima$residuals - lag(best.arima$residuals))^2, na.rm = TRUE)/sum(best.arima$residuals^2, na.rm = TRUE)
+dw
+# 2, suggest that our model has capture the remaining autocorrelation in the 
+#residuals. We want a visual check, so we plot our residuals in a histogram
+#should be normaly distributed and have a mean if zero 
+
+hist(residuals.arma, breaks = 30) #looks normally distributed around zerio 
+#we can assume that the residuals are white noise 
+
+########################### Building the Forecast ##################################
+
+#Lets try our ARIMA(4,1,4) model with seasons 
+S2 = rep(c(0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), T/s)
+S3 = rep(c(0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0), T/s)
+S4 = rep(c(0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0), T/s)
+S5 = rep(c(0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0), T/s)
+S6 = rep(c(0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0), T/s)
+S7 = rep(c(0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0), T/s)
+S8 = rep(c(0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0), T/s)
+S9 = rep(c(0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0), T/s)
+S10 = rep(c(0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0), T/s)
+S11 = rep(c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0), T/s)
+S12 = rep(c(0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1), T/s)
+
+TrSeas = model.matrix(~ t+S2+S3+S4+S5+S6+S7+S8+S9+S10+S11+S12)
+TrSeas
+#seasons for the entire season.
+#real model, but it does not work 
+
+#why can I only use lny and not y? Is it because it is not stationary 
+#it is something with the differencing, that i cannot manage to do 
+#differencing and logging is not the same thing, but why can I not do my first difference model
+#what is wrong with it. 
+
+arima.213=arima(y, order=c(2,1,3),include.mean = FALSE,xreg=TrSeas,include.drift=TRUE,optim.control = list(maxit = 20000),method="ML")
